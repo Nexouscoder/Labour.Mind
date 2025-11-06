@@ -3,18 +3,28 @@
 
 The dashboard integrates Prophet for time-series forecasting and Hugging Face Transformers for AI-generated summaries, providing deep insights into India’s employment landscape — both historically and for the future.
 
-🚀 Key Features:
-📈 State-wise Analytics: Explore detailed metrics for each Indian state, including Estimated Unemployment Rate (%) Estimated Employed Population Estimated Labour                               Participation Rate (%) Literacy Rate (%) GDP per Capital Total Population.
-🔮 Forecasting: Predicts future unemployment trends using Facebook Prophet based on past data.
-🗺️ Heatmaps: Visualizes state-wise unemployment and literacy levels using Seaborn and Plotly Express.
-🧠 AI-Generated Summaries: Uses Hugging Face Transformers (DistilBART) to summarize key insights and trends automatically.
-📊 Historical vs. Future View: Compare historical data with future projections using line graphs and forecast charts.
-🧮 Interactive Filtering: Select specific states, metrics, or years using Streamlit widgets for personalized insights.
-⚡ Optimized Performance: Uses @st.cache_data and @st.cache_resource for efficient data loading and model caching.
+🔧 How It Works
 
-📉 Insights Provided by Dashboard:
-                                  Unemployment Trend Analysis – state-wise and national patterns.
-                                  Literacy & Labour Link – correlation between literacy and employment.
-                                  GDP vs Employment Growth – economic strength’s impact on jobs.
-                                  Population Pressure – population growth impact on unemployment.
-                                  AI Summaries – automatic insight generation for each state.
+Data Loading
+
+Reads data from database.db using sqlite3 and pandas.
+
+Uses @st.cache_data to avoid reloading during refresh.
+
+Visualization
+
+Generates dynamic plots and heatmaps using Seaborn, Matplotlib, and Plotly.
+
+Displays trends in unemployment, employment, and labor participation rates.
+
+Forecasting
+
+Uses Prophet to predict future unemployment rates.
+
+Handles trends, seasonal components, and time-based features automatically.
+
+AI-Generated Summary
+
+Integrates Hugging Face’s summarization pipeline (sshleifer/distilbart-cnn-12-6).
+
+Summarizes statistical data into a short natural language insight block.
