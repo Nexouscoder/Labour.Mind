@@ -161,64 +161,8 @@ def local_quick_summary(text, n_sentences=2):
     sents = [p.strip() for p in text.split('.') if p.strip()]
     return '. '.join(sents[:n_sentences]) + ('.' if len(sents) >= n_sentences else '')
 
-@st.cache_resource
-def call_hf_router(text, model="facebook/bart-large-cnn", max_length=140, min_length=30):
-    if not HF_TOKEN:
-        raise RuntimeError("HF_API_TOKEN missing in Streamlit Secrets.")
-    headers = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"}
-    payload = {"model": model, "inputs": text, "parameters": {"max_length": max_length, "min_length": min_length}}
-    resp = requests.post(ROUTER, headers=headers, json=payload, timeout=45)
-    resp.raise_for_status()
-    out = resp.json()
-    # handle common shapes
-    if isinstance(out, list) and out and isinstance(out[0], dict):
-        return out[0].get("summary_text") or out[0].get("generated_text") or str(out[0])
-    if isinstance(out, dict):
-        return out.get("summary_text") or out.get("generated_text") or str(out)
-    return str(out)
 
-# choose df to summarize
-df_for_summary = filtered_df.copy() if "filtered_df" in globals() and filtered_df is not None else df.copy()
 
-st.subheader("AI-Generated Summary")
-
-if df_for_summary.empty:
-    st.info("No data to summarize for current selection.")
-else:
-    cols = [c for c in ['Estimated Unemployment Rate (%)','Estimated Employed',
-                        'Estimated Labour Participation Rate (%)','Literacy Rate (%)','GDP per Capita']
-            if c in df_for_summary.columns]
-    if not cols:
-        st.info("No matching numeric columns found to summarize.")
-    else:
-        # Create a concise human-readable input string
-        summary_input = make_readable_summary_text(df_for_summary, cols)
-        if not summary_input:
-            st.info("Not enough numeric data to summarize.")
-        else:
-            try:
-                with st.spinner("Generating AI summary..."):
-                    ai_text = call_hf_router(summary_input)
-                st.success("AI summary (remote)")
-                st.info(ai_text)
-            except requests.HTTPError as http_err:
-                # show concise error info for debugging
-                st.error(f"Summarization API error: {http_err}")
-                try:
-                    st.write(http_err.response.text)
-                except Exception:
-                    pass
-                st.warning("Using local quick summary instead.")
-                st.info(local_quick_summary(summary_input))
-            except RuntimeError as e:
-                st.error(str(e))
-                st.warning("Using local quick summary instead.")
-                st.info(local_quick_summary(summary_input))
-            except Exception as e:
-                st.error("Unexpected error calling summarizer.")
-                st.write(repr(e))
-                st.warning("Using local quick summary instead.")
-                st.info(local_quick_summary(summary_input))
 
 
 
