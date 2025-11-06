@@ -127,92 +127,55 @@ st.plotly_chart(fig, use_container_width=True)
 # Smart Summary using Hugging Face summarizer
 
 # Replace previous summarize_text_remote with this (uses new HF router endpoint)
-import os
+# --- Minimal AI summary (paste after filtered_df is defined) ---
 import requests
 import streamlit as st
 
-HF_API_TOKEN = os.environ.get("HF_API_TOKEN")
-ROUTER_URL = "https://router.huggingface.co/hf-inference"
-HEADERS = {"Authorization": f"Bearer {HF_API_TOKEN}", "Content-Type": "application/json"} if HF_API_TOKEN else {}
-
-def local_fallback_summary(text: str, n_sentences: int = 3) -> str:
-    """Very small, deterministic fallback summary (no external API)."""
-    # Simple heuristic: take first n_sentences from text (split by periods)
-    parts = [p.strip() for p in text.split('.') if p.strip()]
-    if not parts:
-        return "No textual data available to summarize."
-    return '. '.join(parts[:n_sentences]) + ('.' if len(parts) >= n_sentences else '')
+HF_TOKEN = st.secrets.get("HF_API_TOKEN")
+ROUTER = "https://router.huggingface.co/hf-inference"
 
 @st.cache_resource
-def summarize_text_remote_router(text: str, model: str = "sshleifer/distilbart-cnn-12-6",
-                                 max_length: int = 150, min_length: int = 40, timeout: int = 60) -> str:
-    """
-    Summarize text using Hugging Face Router API:
-    POST https://router.huggingface.co/hf-inference
-    Payload: { "model": "<model-id>", "inputs": "...", "parameters": {...} }
-    """
-    if not HF_API_TOKEN:
-        raise RuntimeError("HF_API_TOKEN not set. Add it in Streamlit Secrets.")
-
-    payload = {
-        "model": model,
-        "inputs": text,
-        "parameters": {"max_length": max_length, "min_length": min_length}
-    }
-
-    resp = requests.post(ROUTER_URL, headers=HEADERS, json=payload, timeout=timeout)
-
-    # If model removed or router returns 410/404, raise for handling below
+def hf_summary_remote(text, model="facebook/bart-large-cnn", max_length=140, min_length=30):
+    if not HF_TOKEN:
+        raise RuntimeError("HF_API_TOKEN missing in Streamlit Secrets.")
+    headers = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"}
+    payload = {"model": model, "inputs": text, "parameters": {"max_length": max_length, "min_length": min_length}}
+    resp = requests.post(ROUTER, headers=headers, json=payload, timeout=45)
     resp.raise_for_status()
-    result = resp.json()
+    out = resp.json()
+    # handle common response shapes
+    if isinstance(out, list) and out and isinstance(out[0], dict):
+        return out[0].get("summary_text") or out[0].get("generated_text") or str(out[0])
+    if isinstance(out, dict):
+        return out.get("summary_text") or out.get("generated_text") or str(out)
+    return str(out)
 
-    # Router returns a list of possible outputs or an object; handle common shapes
-    # Typical successful shape: [{"generated_text": "..."}] OR [{"summary_text":"..."}] OR {"error": "..."}
-    if isinstance(result, list) and len(result) > 0:
-        first = result[0]
-        if isinstance(first, dict):
-            for key in ("summary_text", "generated_text", "text"):
-                if key in first:
-                    return first[key]
-            # last resort: return joined dict text
-            return str(first)
-        return str(first)
-    if isinstance(result, dict):
-        # sometimes the router returns {"error": "..."} or {"summary_text": "..."}
-        if "summary_text" in result:
-            return result["summary_text"]
-        if "generated_text" in result:
-            return result["generated_text"]
-        if "error" in result:
-            raise RuntimeError(f"HuggingFace Router Error: {result['error']}")
-        return str(result)
+def local_fallback(text, n=2):
+    parts = [p.strip() for p in text.split('.') if p.strip()]
+    return ('. '.join(parts[:n]) + ('.' if parts else '')) or "No text to summarize."
 
-    return str(result)
+# choose dataframe to summarize
+df_for_summary = filtered_df.copy() if "filtered_df" in globals() and filtered_df is not None else df.copy()
 
-# Example usage integration (defensive wrapper)
-def get_ai_summary_or_fallback(text_for_summary: str) -> str:
-    try:
-        with st.spinner("Generating AI summary..."):
-            return summarize_text_remote_router(text_for_summary)
-    except requests.HTTPError as http_err:
-        # Common HTTP error cases: 410 (gone), 403 (forbidden), 429 (rate limit)
-        st.error(f"Summarization API error: {http_err}")
+st.subheader("AI-Generated Summary")
+if df_for_summary.empty:
+    st.info("No data to summarize for current selection.")
+else:
+    cols = [c for c in ['Estimated Unemployment Rate (%)','Estimated Employed',
+                        'Estimated Labour Participation Rate (%)','Literacy Rate (%)','GDP per Capita'] if c in df_for_summary.columns]
+    if not cols:
+        st.info("No matching columns found for summary.")
+    else:
+        text = df_for_summary[cols].describe().to_string()
+        if "State" in df_for_summary.columns:
+            text = f"State(s): {', '.join(map(str, df_for_summary['State'].unique()[:8]))}\n\n" + text
         try:
-            # Show server response body if available (safe for logs/preview)
-            st.write("Response:", http_err.response.text)
+            with st.spinner("Generating AI summary..."):
+                result = hf_summary_remote(text)
+            st.info(result)
         except Exception:
-            pass
-        # Fallback to local summarizer
-        st.warning("Using local fallback summary due to remote API error.")
-        return local_fallback_summary(text_for_summary)
-    except RuntimeError as e:
-        st.error(str(e))
-        st.warning("Using local fallback summary.")
-        return local_fallback_summary(text_for_summary)
-    except Exception as e:
-        st.error("Unexpected error calling summarization API.")
-        st.write(repr(e))
-        return local_fallback_summary(text_for_summary)
+            st.warning("Remote summarizer failed — showing quick local summary.")
+            st.info(local_fallback(text))
 
 
 
