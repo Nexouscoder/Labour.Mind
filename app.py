@@ -6,7 +6,6 @@ import sqlite3
 import matplotlib.pyplot as plt
 import seaborn as sns
 from prophet import Prophet
-from transformers import pipeline
 import torch
 import plotly.express as px
 
@@ -140,3 +139,4 @@ def summarize_text(text, max_length=150, min_length=40):
     return response.json()[0]['summary_text']
 summary = summarize_text(summary_input)
 st.info(summary)
+
