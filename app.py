@@ -125,18 +125,60 @@ fig.add_scatter(
 st.plotly_chart(fig, use_container_width=True)
 
 # Smart Summary using Hugging Face summarizer
-st.subheader("🧠 AI-Generated Summary ")
-HF_API_TOKEN = os.environ.get("HF_API_TOKEN")  # stored securely in Streamlit secrets
+
+import os
+import requests
+
+# Get Hugging Face API token from Streamlit Secrets
+HF_API_TOKEN = os.environ.get("HF_API_TOKEN")
 API_URL = "https://api-inference.huggingface.co/models/sshleifer/distilbart-cnn-12-6"
-headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
+HEADERS = {"Authorization": f"Bearer {HF_API_TOKEN}"} if HF_API_TOKEN else {}
 
 @st.cache_resource
-def summarize_text(text, max_length=150, min_length=40):
+def summarize_text_remote(text: str, max_length: int = 150, min_length: int = 40, timeout: int = 60):
+    """Summarize text using Hugging Face Inference API (DistilBART)."""
+    if not HF_API_TOKEN:
+        raise RuntimeError("⚠️ Hugging Face API token missing. Add HF_API_TOKEN in Streamlit Secrets.")
     payload = {"inputs": text, "parameters": {"max_length": max_length, "min_length": min_length}}
-    response = requests.post(API_URL, headers=headers, json=payload, timeout=60)
-    response.raise_for_status()
-    return response.json()[0]['summary_text']
-summary = summarize_text(summary_input)
-st.info(summary)
+    resp = requests.post(API_URL, headers=HEADERS, json=payload, timeout=timeout)
+    resp.raise_for_status()
+    result = resp.json()
+    if isinstance(result, list) and len(result) > 0 and "summary_text" in result[0]:
+        return result[0]["summary_text"]
+    return str(result)
+
+# Generate summary from filtered data (replace `filtered_df` with your active dataframe)
+try:
+    st.subheader("🧠 AI-Generated Summary")
+    # Build summary input dynamically
+    cols_for_summary = [
+        'Estimated Unemployment Rate (%)',
+        'Estimated Employed',
+        'Estimated Labour Participation Rate (%)',
+        'Literacy Rate (%)',
+        'GDP per Capita'
+    ]
+    cols_existing = [c for c in cols_for_summary if c in filtered_df.columns]
+
+    if len(cols_existing) == 0:
+        st.info("No columns available for summary. Please select a valid state or data range.")
+    else:
+        # Prepare data text for summarization
+        summary_input = filtered_df[cols_existing].describe().to_string()
+        if "State" in filtered_df.columns:
+            states = filtered_df['State'].unique().tolist()
+            summary_input = f"State(s): {', '.join(states)}\n" + summary_input
+
+        # Call API and display result
+        with st.spinner("Generating AI summary..."):
+            ai_summary = summarize_text_remote(summary_input)
+        st.info(ai_summary)
+
+except NameError:
+    st.warning("filtered_df not found. Ensure this block runs after your filters/data selections.")
+except Exception as e:
+    st.error("An unexpected error occurred while generating the AI summary.")
+    st.write(repr(e))
+
 
 
