@@ -126,16 +126,43 @@ st.plotly_chart(fig, use_container_width=True)
 
 # Smart Summary using Hugging Face summarizer
 
-# Replace previous summarize_text_remote with this (uses new HF router endpoint)
-# --- Minimal AI summary (paste after filtered_df is defined) ---
-import requests
+# ===== Compact, robust AI summary (replace previous block) =====
 import streamlit as st
+import requests
 
-HF_TOKEN = st.secrets.get("HF_API_TOKEN")
+HF_TOKEN = st.secrets.get("HF_API_TOKEN")  # make sure this exists in Streamlit Secrets
 ROUTER = "https://router.huggingface.co/hf-inference"
 
+def make_readable_summary_text(df, cols):
+    """Convert numeric stats into plain-language sentences."""
+    parts = []
+    for c in cols:
+        ser = df[c].dropna()
+        if ser.empty:
+            continue
+        mean = ser.mean()
+        median = ser.median()
+        mn = ser.min()
+        mx = ser.max()
+        parts.append(f"{c}: mean {mean:.2f}, median {median:.2f}, min {mn:.2f}, max {mx:.2f}.")
+    if not parts:
+        return ""
+    # Optionally include state/date header
+    header = ""
+    if "State" in df.columns:
+        states = ", ".join(map(str, df["State"].unique()[:6]))
+        header += f"State(s): {states}. "
+    if "Date" in df.columns:
+        header += f"Data from {df['Date'].min().date()} to {df['Date'].max().date()}. "
+    return header + " ".join(parts)
+
+def local_quick_summary(text, n_sentences=2):
+    # Very short fallback: return the first n sentences (text is already short)
+    sents = [p.strip() for p in text.split('.') if p.strip()]
+    return '. '.join(sents[:n_sentences]) + ('.' if len(sents) >= n_sentences else '')
+
 @st.cache_resource
-def hf_summary_remote(text, model="facebook/bart-large-cnn", max_length=140, min_length=30):
+def call_hf_router(text, model="facebook/bart-large-cnn", max_length=140, min_length=30):
     if not HF_TOKEN:
         raise RuntimeError("HF_API_TOKEN missing in Streamlit Secrets.")
     headers = {"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"}
@@ -143,39 +170,57 @@ def hf_summary_remote(text, model="facebook/bart-large-cnn", max_length=140, min
     resp = requests.post(ROUTER, headers=headers, json=payload, timeout=45)
     resp.raise_for_status()
     out = resp.json()
-    # handle common response shapes
+    # handle common shapes
     if isinstance(out, list) and out and isinstance(out[0], dict):
         return out[0].get("summary_text") or out[0].get("generated_text") or str(out[0])
     if isinstance(out, dict):
         return out.get("summary_text") or out.get("generated_text") or str(out)
     return str(out)
 
-def local_fallback(text, n=2):
-    parts = [p.strip() for p in text.split('.') if p.strip()]
-    return ('. '.join(parts[:n]) + ('.' if parts else '')) or "No text to summarize."
-
-# choose dataframe to summarize
+# choose df to summarize
 df_for_summary = filtered_df.copy() if "filtered_df" in globals() and filtered_df is not None else df.copy()
 
 st.subheader("AI-Generated Summary")
+
 if df_for_summary.empty:
     st.info("No data to summarize for current selection.")
 else:
     cols = [c for c in ['Estimated Unemployment Rate (%)','Estimated Employed',
-                        'Estimated Labour Participation Rate (%)','Literacy Rate (%)','GDP per Capita'] if c in df_for_summary.columns]
+                        'Estimated Labour Participation Rate (%)','Literacy Rate (%)','GDP per Capita']
+            if c in df_for_summary.columns]
     if not cols:
-        st.info("No matching columns found for summary.")
+        st.info("No matching numeric columns found to summarize.")
     else:
-        text = df_for_summary[cols].describe().to_string()
-        if "State" in df_for_summary.columns:
-            text = f"State(s): {', '.join(map(str, df_for_summary['State'].unique()[:8]))}\n\n" + text
-        try:
-            with st.spinner("Generating AI summary..."):
-                result = hf_summary_remote(text)
-            st.info(result)
-        except Exception:
-            st.warning("Remote summarizer failed — showing quick local summary.")
-            st.info(local_fallback(text))
+        # Create a concise human-readable input string
+        summary_input = make_readable_summary_text(df_for_summary, cols)
+        if not summary_input:
+            st.info("Not enough numeric data to summarize.")
+        else:
+            try:
+                with st.spinner("Generating AI summary..."):
+                    ai_text = call_hf_router(summary_input)
+                st.success("AI summary (remote)")
+                st.info(ai_text)
+            except requests.HTTPError as http_err:
+                # show concise error info for debugging
+                st.error(f"Summarization API error: {http_err}")
+                try:
+                    st.write(http_err.response.text)
+                except Exception:
+                    pass
+                st.warning("Using local quick summary instead.")
+                st.info(local_quick_summary(summary_input))
+            except RuntimeError as e:
+                st.error(str(e))
+                st.warning("Using local quick summary instead.")
+                st.info(local_quick_summary(summary_input))
+            except Exception as e:
+                st.error("Unexpected error calling summarizer.")
+                st.write(repr(e))
+                st.warning("Using local quick summary instead.")
+                st.info(local_quick_summary(summary_input))
+
+
 
 
 
